@@ -1,0 +1,3 @@
+rootProject.name = 'http4k-websockets'
+rootProject.buildFileName = 'build.gradle.kts'
+
