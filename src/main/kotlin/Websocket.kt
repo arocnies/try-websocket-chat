@@ -7,34 +7,41 @@ import org.http4k.websocket.Websocket
 import org.http4k.websocket.WsConsumer
 import org.http4k.websocket.WsMessage
 
-val namePath = Path.of("name")
+class App {
+    val nameLens = Path.of("name") // Using lens for extracting path param.
+    val clients = mutableListOf<Websocket>()
+    fun broadcast(sender: String, message: String) = clients.forEach { it.send(WsMessage("$sender: $message")) }
+    val chatWebsocket: WsConsumer = { ws ->
+        val name = nameLens(ws.upgradeRequest)
 
-val activeWebsockets = mutableListOf<Websocket>()
-val wsc: WsConsumer = { ws ->
-    val name = namePath(ws.upgradeRequest)
-    activeWebsockets.add(ws)
-    broadcast("Server", "$name joined the server.")
-    ws.onMessage { message -> broadcast(name, message.bodyString()) }
-    ws.onClose {
-        broadcast("Server", "Goodbye $name!")
-        activeWebsockets.remove(ws)
+        // Start tracking this new websocket.
+        clients.add(ws)
+        broadcast("Server", "Welcome $name!")
+
+        // Broadcast this clients message.
+        ws.onMessage {
+            broadcast(name, it.bodyString())
+        }
+
+        // Broadcast the client is leaving.
+        ws.onClose {
+            broadcast("Server", "Goodbye $name")
+            clients.remove(ws)
+        }
     }
+
+    val app = websockets(
+            "/b/{name}" bind { ws: Websocket ->
+                ws.send(WsMessage("Hello!"))
+                ws.onMessage { ws.send(WsMessage("I heard: \"${it.bodyString()}\"")) }
+                ws.onClose {
+                    ws.send(WsMessage("Goodbye!"))
+                }
+            },
+            "/{name}" bind chatWebsocket
+    )
 }
 
-fun broadcast(sender: String, message: String) =
-        activeWebsockets.forEach { it.send(WsMessage("$sender: $message")) }
-
-val app = websockets(
-        "/{name}" bind { ws: Websocket ->
-            ws.send(WsMessage("Hello!"))
-            ws.onMessage { ws.send(WsMessage("I heard: \"${it.bodyString()}\"")) }
-            ws.onClose {
-                ws.send(WsMessage("Goodbye!"))
-            }
-        },
-        "/join/{name}" bind wsc
-)
-
 fun main(args: Array<String>) {
-    app.asServer(Jetty(9000)).start().block()
+    App().app.asServer(Jetty(9000)).start().block()
 }
